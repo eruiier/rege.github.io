@@ -82,20 +82,27 @@ end
 
 local function fallbackNudge(humanoid, root, targetPos, nudgeStep)
     nudgeStep = nudgeStep or 6
-    local direction = (targetPos - root.Position).Unit
+    local direction = (targetPos - root.Position)
+    if direction.Magnitude < 1 then return end
+    direction = direction.Unit
     local nudgePos = root.Position + direction * nudgeStep
     tryJump(humanoid)
     tryMoveTo(humanoid, nudgePos, 1.2)
 end
 
-local function chunkTowards(humanoid, startPart, endPos, chunkSize)
-    local currentPos = startPart.Position
-    local direction = (endPos - currentPos).Unit
-    local totalDist = (endPos - currentPos).Magnitude
-    local steps = math.ceil(totalDist / chunkSize)
-    for i = 1, steps do
-        if not goToShelbyEnabled then break end
-        local nextPos = (i == steps) and endPos or (currentPos + direction * chunkSize * i)
+-- This version will always move towards the target in small steps until it's close
+local function moveCloserAndCloser(humanoid, root, targetPos, stepSize, tolerance)
+    tolerance = tolerance or 8
+    stepSize = math.min(stepSize or 90, 250) -- never let a single move exceed 250 studs
+    while (root.Position - targetPos).Magnitude > tolerance and goToShelbyEnabled do
+        local currentPos = root.Position
+        local direction = (targetPos - currentPos)
+        local dist = direction.Magnitude
+        if dist < 1 then break end
+        direction = direction.Unit
+        local nextPos = (dist < stepSize) and targetPos or (currentPos + direction * stepSize)
+
+        -- Try pathfinding for this step, but if it fails, just nudge forward and jump if needed
         local path = PathfindingService:CreatePath({
             AgentRadius = 2,
             AgentHeight = 4,
@@ -103,29 +110,27 @@ local function chunkTowards(humanoid, startPart, endPos, chunkSize)
             AgentJumpHeight = 16,
             AgentMaxSlope = 45,
         })
-        path:ComputeAsync(startPart.Position, nextPos)
+        path:ComputeAsync(currentPos, nextPos)
         if path.Status == Enum.PathStatus.Success then
             local waypoints = path:GetWaypoints()
             for _, waypoint in ipairs(waypoints) do
                 if not goToShelbyEnabled then break end
                 local reached = tryMoveTo(humanoid, waypoint.Position, 2.5)
                 if not reached then
-                    -- Try to jump or nudge if stuck
                     tryJump(humanoid)
-                    fallbackNudge(humanoid, startPart, waypoint.Position, 8)
+                    fallbackNudge(humanoid, root, waypoint.Position, 8)
                 end
             end
-            currentPos = nextPos
         else
-            -- fallback: nudge forward and try to jump
-            fallbackNudge(humanoid, startPart, nextPos, 12)
-            currentPos = nextPos
+            fallbackNudge(humanoid, root, nextPos, 10)
         end
+
+        task.wait(0.1)
     end
 end
 
 Tabs.Main:Toggle({
-    Title = "Go To Shelby (Robust Path)",
+    Title = "Go To Shelby (Get Closer and Closer)",
     Icon = "pointer",
     Default = false,
     Callback = function(state)
@@ -134,7 +139,6 @@ Tabs.Main:Toggle({
             if goToShelbyThread then return end
             goToShelbyThread = task.spawn(function()
                 local targetPos = Vector3.new(702, -4, -1772)
-                local reachedShelbyArea = false
                 while goToShelbyEnabled do
                     local character = LocalPlayer.Character
                     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -143,17 +147,14 @@ Tabs.Main:Toggle({
                         task.wait(0.5)
                         continue
                     end
-                    if not reachedShelbyArea then
-                        chunkTowards(humanoid, root, targetPos, 150) -- smaller chunks, more frequent pathing
-                        reachedShelbyArea = true
-                    else
-                        local shelby = getShelby()
-                        local shelbyRoot = getRootPart(shelby)
-                        if shelbyRoot then
-                            chunkTowards(humanoid, root, shelbyRoot.Position, 120)
-                        end
-                        task.wait(0.5)
-                    end
+
+                    -- Try to home in on Shelby's live position if possible
+                    local shelby = getShelby()
+                    local shelbyRoot = getRootPart(shelby)
+                    local destination = shelbyRoot and shelbyRoot.Position or targetPos
+
+                    moveCloserAndCloser(humanoid, root, destination, 100, 8)
+                    task.wait(0.3)
                 end
                 goToShelbyThread = nil
             end)
@@ -166,6 +167,11 @@ Tabs.Main:Toggle({
         end
     end
 })
+
+
+
+
+
 
 
 
