@@ -169,6 +169,46 @@ Tabs.Main:Toggle({
 
 
 
+local running = false
+local thread
+
+Tabs.Main:Toggle({
+    Title = "Auto Collect XP",
+    Icon = "recycle",
+    Default = false,
+    Callback = function(state)
+        running = state
+        if running then
+            thread = task.spawn(function()
+                local ReplicatedStorage = game:GetService("ReplicatedStorage")
+                local buffer = rawget(_G, "buffer") or getgenv().buffer
+                if not buffer then
+                    local bufferModule = ReplicatedStorage:FindFirstChild("buffer") or ReplicatedStorage:FindFirstChild("Buffer")
+                    if bufferModule then
+                        buffer = require(bufferModule)
+                    else
+                        return
+                    end
+                end
+                local ByteNetReliable = ReplicatedStorage:WaitForChild("ByteNetReliable")
+                while running do
+                    local args = {
+                        buffer.fromstring("\184\000\020\000\000")
+                    }
+                    ByteNetReliable:FireServer(unpack(args))
+                    task.wait(1)
+                end
+            end)
+        else
+            if thread then
+                task.cancel(thread)
+                thread = nil
+            end
+        end
+    end
+})
+
+
 
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local autoMineEnabled = false
